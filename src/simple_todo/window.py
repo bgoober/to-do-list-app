@@ -71,28 +71,29 @@ class ListRow(Gtk.Box):
     """A row widget representing a to-do list in the sidebar."""
     
     def __init__(self, todo_list: TodoList, on_edit_list):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self.todo_list = todo_list
         self.on_edit_list = on_edit_list
         
-        self.set_margin_start(6)
+        self.set_margin_start(8)
         self.set_margin_end(4)
-        self.set_margin_top(4)
-        self.set_margin_bottom(4)
+        self.set_margin_top(6)
+        self.set_margin_bottom(6)
         
-        # List name label - wrap text instead of ellipsize
+        # List name label - wrap text but not too aggressively
         self.label = Gtk.Label(label=todo_list.name)
         self.label.set_hexpand(True)
-        self.label.set_halign(Gtk.Align.START)
+        self.label.set_halign(Gtk.Align.FILL)
         self.label.set_wrap(True)
         self.label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
         self.label.set_xalign(0)  # Left align text
-        self.label.set_max_width_chars(12)  # Help with wrapping
+        self.label.set_natural_wrap_mode(Gtk.NaturalWrapMode.NONE)
         self.append(self.label)
         
-        # Right side container for badge and edit button
-        right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        # Right side container for badge and edit button (minimal width)
+        right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         right_box.set_valign(Gtk.Align.CENTER)
+        right_box.set_halign(Gtk.Align.END)
         
         # Task count badge
         pending = len(todo_list.get_pending_tasks())
@@ -122,7 +123,7 @@ class ListRow(Gtk.Box):
 class MainWindow(Adw.ApplicationWindow):
     """Main application window with list sidebar and task panel."""
     
-    SIDEBAR_WIDTH = 110
+    SIDEBAR_WIDTH = 175
     
     def __init__(self, app):
         super().__init__(application=app)
@@ -192,14 +193,16 @@ class MainWindow(Adw.ApplicationWindow):
         
         main_box.append(header)
         
-        # Horizontal box for sidebar and content (replaces Paned)
-        self.content_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.content_hbox.set_vexpand(True)
-        main_box.append(self.content_hbox)
+        # Paned container for sidebar and content (draggable divider)
+        self.paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.paned.set_vexpand(True)
+        self.paned.set_shrink_start_child(False)  # Prevent sidebar from completely shrinking
+        self.paned.set_shrink_end_child(False)    # Prevent content from completely shrinking
+        main_box.append(self.paned)
         
-        # Left sidebar for lists (fixed width, no drag resize)
+        # Left sidebar for lists
         self.sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.sidebar_box.set_size_request(self.SIDEBAR_WIDTH, -1)
+        self.sidebar_box.set_size_request(150, -1)  # Minimum width
         self.sidebar_box.add_css_class("sidebar")
         self.sidebar_box.add_css_class("sidebar-container")
         
@@ -230,7 +233,7 @@ class MainWindow(Adw.ApplicationWindow):
         scroll_lists.set_child(self.lists_box)
         
         self.sidebar_box.append(scroll_lists)
-        self.content_hbox.append(self.sidebar_box)
+        self.paned.set_start_child(self.sidebar_box)
         
         # Right content area for tasks
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -267,7 +270,8 @@ class MainWindow(Adw.ApplicationWindow):
         
         content_box.append(scroll_tasks)
         
-        self.content_hbox.append(content_box)
+        self.paned.set_end_child(content_box)
+        self.paned.set_position(self.SIDEBAR_WIDTH)  # Initial sidebar width
         
         # Placeholder when no list selected
         self.placeholder = Adw.StatusPage()
@@ -280,12 +284,16 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_toggle_sidebar(self, btn):
         """Toggle sidebar visibility."""
         self.sidebar_expanded = not self.sidebar_expanded
-        self.sidebar_box.set_visible(self.sidebar_expanded)
         
-        # Update icon based on state
         if self.sidebar_expanded:
+            # Show sidebar and restore to default width (175)
+            self.sidebar_box.set_visible(True)
+            self.paned.set_position(self.SIDEBAR_WIDTH)
             self.sidebar_toggle_btn.set_icon_name("sidebar-show-symbolic")
         else:
+            # Completely collapse sidebar to 0
+            self.paned.set_position(0)
+            self.sidebar_box.set_visible(False)
             self.sidebar_toggle_btn.set_icon_name("sidebar-show-right-symbolic")
     
     def _update_content_visibility(self):
@@ -432,7 +440,7 @@ class MainWindow(Adw.ApplicationWindow):
                     if row.todo_list.id == new_list.id:
                         self.lists_box.select_row(row)
                         break
-            dialog.destroy()
+            dialog.close()
         
         dialog.connect("response", on_response)
         entry.connect("activate", lambda e: dialog.response("create"))
@@ -452,7 +460,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_default_response("cancel")
         
         def on_response(dialog, response):
-            dialog.destroy()
+            dialog.close()
             if response == "rename":
                 self._show_rename_dialog(todo_list)
             elif response == "delete":
@@ -492,7 +500,7 @@ class MainWindow(Adw.ApplicationWindow):
                     else:
                         # Show error - name is likely a duplicate
                         self._show_error_dialog("Could not rename list. The name may already be in use.")
-            dialog.destroy()
+            dialog.close()
         
         dialog.connect("response", on_response)
         entry.connect("activate", lambda e: dialog.response("rename"))
@@ -529,7 +537,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._load_lists()
                 self._load_tasks()
                 self._update_content_visibility()
-            dialog.destroy()
+            dialog.close()
         
         dialog.connect("response", on_response)
         dialog.present()
@@ -590,7 +598,7 @@ class MainWindow(Adw.ApplicationWindow):
                     self.storage.update_task(self.current_list.id, task.id, title)
                     self.current_list = self.storage.get_list(self.current_list.id)
                     self._load_tasks()
-            dialog.destroy()
+            dialog.close()
         
         dialog.connect("response", on_response)
         entry.connect("activate", lambda e: dialog.response("save"))
