@@ -70,37 +70,65 @@ class TaskRow(Gtk.Box):
 class ListRow(Gtk.Box):
     """A row widget representing a to-do list in the sidebar."""
     
-    def __init__(self, todo_list: TodoList):
-        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    def __init__(self, todo_list: TodoList, on_edit_list):
+        super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.todo_list = todo_list
+        self.on_edit_list = on_edit_list
         
-        self.set_margin_start(8)
-        self.set_margin_end(8)
-        self.set_margin_top(6)
-        self.set_margin_bottom(6)
+        self.set_margin_start(6)
+        self.set_margin_end(4)
+        self.set_margin_top(4)
+        self.set_margin_bottom(4)
         
-        # List name label
+        # List name label - wrap text instead of ellipsize
         self.label = Gtk.Label(label=todo_list.name)
         self.label.set_hexpand(True)
         self.label.set_halign(Gtk.Align.START)
-        self.label.set_ellipsize(Pango.EllipsizeMode.END)
+        self.label.set_wrap(True)
+        self.label.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        self.label.set_xalign(0)  # Left align text
+        self.label.set_max_width_chars(12)  # Help with wrapping
         self.append(self.label)
+        
+        # Right side container for badge and edit button
+        right_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        right_box.set_valign(Gtk.Align.CENTER)
         
         # Task count badge
         pending = len(todo_list.get_pending_tasks())
         if pending > 0:
-            count_label = Gtk.Label(label=str(pending))
-            count_label.add_css_class("badge")
-            self.append(count_label)
+            self.count_label = Gtk.Label(label=str(pending))
+            self.count_label.add_css_class("badge")
+            right_box.append(self.count_label)
+        
+        # Edit button (hidden by default, shown when selected)
+        self.edit_btn = Gtk.Button(icon_name="document-edit-symbolic")
+        self.edit_btn.add_css_class("flat")
+        self.edit_btn.set_tooltip_text("Edit list")
+        self.edit_btn.set_visible(False)
+        self.edit_btn.connect("clicked", self._on_edit_clicked)
+        right_box.append(self.edit_btn)
+        
+        self.append(right_box)
+    
+    def set_selected(self, selected: bool):
+        """Show or hide the edit button based on selection state."""
+        self.edit_btn.set_visible(selected)
+    
+    def _on_edit_clicked(self, btn):
+        self.on_edit_list(self.todo_list)
 
 
 class MainWindow(Adw.ApplicationWindow):
     """Main application window with list sidebar and task panel."""
     
+    SIDEBAR_WIDTH = 110
+    
     def __init__(self, app):
         super().__init__(application=app)
         self.storage = Storage()
         self.current_list: TodoList | None = None
+        self.sidebar_expanded = True
         
         self.set_title("Simple Todo")
         self.set_default_size(800, 600)
@@ -130,6 +158,9 @@ class MainWindow(Adw.ApplicationWindow):
             .completed-section {
                 opacity: 0.7;
             }
+            .sidebar-container {
+                border-right: 1px solid @borders;
+            }
         """)
         Gtk.StyleContext.add_provider_for_display(
             self.get_display(),
@@ -147,6 +178,12 @@ class MainWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar()
         header.set_title_widget(Gtk.Label(label="Simple Todo"))
         
+        # Sidebar toggle button in header
+        self.sidebar_toggle_btn = Gtk.Button(icon_name="sidebar-show-symbolic")
+        self.sidebar_toggle_btn.set_tooltip_text("Toggle Sidebar")
+        self.sidebar_toggle_btn.connect("clicked", self._on_toggle_sidebar)
+        header.pack_start(self.sidebar_toggle_btn)
+        
         # New list button in header
         new_list_btn = Gtk.Button(icon_name="list-add-symbolic")
         new_list_btn.set_tooltip_text("New List")
@@ -155,15 +192,16 @@ class MainWindow(Adw.ApplicationWindow):
         
         main_box.append(header)
         
-        # Paned container for sidebar and content
-        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        paned.set_vexpand(True)
-        main_box.append(paned)
+        # Horizontal box for sidebar and content (replaces Paned)
+        self.content_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self.content_hbox.set_vexpand(True)
+        main_box.append(self.content_hbox)
         
-        # Left sidebar for lists
-        sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        sidebar_box.set_size_request(200, -1)
-        sidebar_box.add_css_class("sidebar")
+        # Left sidebar for lists (fixed width, no drag resize)
+        self.sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.sidebar_box.set_size_request(self.SIDEBAR_WIDTH, -1)
+        self.sidebar_box.add_css_class("sidebar")
+        self.sidebar_box.add_css_class("sidebar-container")
         
         # Lists header
         lists_header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
@@ -178,7 +216,7 @@ class MainWindow(Adw.ApplicationWindow):
         lists_label.add_css_class("heading")
         lists_header.append(lists_label)
         
-        sidebar_box.append(lists_header)
+        self.sidebar_box.append(lists_header)
         
         # Scrollable list of lists
         scroll_lists = Gtk.ScrolledWindow()
@@ -191,8 +229,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.lists_box.connect("row-selected", self._on_list_selected)
         scroll_lists.set_child(self.lists_box)
         
-        sidebar_box.append(scroll_lists)
-        paned.set_start_child(sidebar_box)
+        self.sidebar_box.append(scroll_lists)
+        self.content_hbox.append(self.sidebar_box)
         
         # Right content area for tasks
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -208,6 +246,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.task_entry = Gtk.Entry()
         self.task_entry.set_hexpand(True)
         self.task_entry.set_placeholder_text("Add a new task...")
+        self.task_entry.set_max_length(256)  # Enforce task title limit
         self.task_entry.connect("activate", self._on_add_task)
         input_box.append(self.task_entry)
         
@@ -228,26 +267,7 @@ class MainWindow(Adw.ApplicationWindow):
         
         content_box.append(scroll_tasks)
         
-        # List action buttons at bottom
-        action_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        action_box.set_margin_start(12)
-        action_box.set_margin_end(12)
-        action_box.set_margin_bottom(12)
-        action_box.set_halign(Gtk.Align.END)
-        
-        self.rename_btn = Gtk.Button(label="Rename List")
-        self.rename_btn.connect("clicked", self._on_rename_list)
-        action_box.append(self.rename_btn)
-        
-        self.delete_list_btn = Gtk.Button(label="Delete List")
-        self.delete_list_btn.add_css_class("destructive-action")
-        self.delete_list_btn.connect("clicked", self._on_delete_list)
-        action_box.append(self.delete_list_btn)
-        
-        content_box.append(action_box)
-        
-        paned.set_end_child(content_box)
-        paned.set_position(220)
+        self.content_hbox.append(content_box)
         
         # Placeholder when no list selected
         self.placeholder = Adw.StatusPage()
@@ -257,15 +277,27 @@ class MainWindow(Adw.ApplicationWindow):
         
         self._update_content_visibility()
     
+    def _on_toggle_sidebar(self, btn):
+        """Toggle sidebar visibility."""
+        self.sidebar_expanded = not self.sidebar_expanded
+        self.sidebar_box.set_visible(self.sidebar_expanded)
+        
+        # Update icon based on state
+        if self.sidebar_expanded:
+            self.sidebar_toggle_btn.set_icon_name("sidebar-show-symbolic")
+        else:
+            self.sidebar_toggle_btn.set_icon_name("sidebar-show-right-symbolic")
+    
     def _update_content_visibility(self):
         """Show placeholder or content based on selection."""
         has_list = self.current_list is not None
         self.task_entry.set_sensitive(has_list)
-        self.rename_btn.set_sensitive(has_list)
-        self.delete_list_btn.set_sensitive(has_list)
     
     def _load_lists(self):
         """Load all lists into the sidebar."""
+        # Remember current selection
+        current_id = self.current_list.id if self.current_list else None
+        
         # Clear existing
         while True:
             row = self.lists_box.get_row_at_index(0)
@@ -277,15 +309,27 @@ class MainWindow(Adw.ApplicationWindow):
         lists = self.storage.get_lists()
         for todo_list in lists:
             row = Gtk.ListBoxRow()
-            row.set_child(ListRow(todo_list))
+            list_row = ListRow(todo_list, on_edit_list=self._on_edit_list)
+            row.set_child(list_row)
             row.todo_list = todo_list
+            row.list_row_widget = list_row
             self.lists_box.append(row)
         
-        # Select first list if available
-        if lists and self.current_list is None:
-            first_row = self.lists_box.get_row_at_index(0)
-            if first_row:
-                self.lists_box.select_row(first_row)
+        # Re-select previous list or first list
+        if lists:
+            selected = False
+            if current_id:
+                for i in range(len(lists)):
+                    row = self.lists_box.get_row_at_index(i)
+                    if row and row.todo_list.id == current_id:
+                        self.lists_box.select_row(row)
+                        selected = True
+                        break
+            
+            if not selected and self.current_list is None:
+                first_row = self.lists_box.get_row_at_index(0)
+                if first_row:
+                    self.lists_box.select_row(first_row)
     
     def _load_tasks(self):
         """Load tasks for the current list."""
@@ -341,6 +385,14 @@ class MainWindow(Adw.ApplicationWindow):
     
     def _on_list_selected(self, listbox, row):
         """Handle list selection."""
+        # Update edit button visibility for all rows
+        for i in range(100):  # Max lists
+            list_row = self.lists_box.get_row_at_index(i)
+            if list_row is None:
+                break
+            if hasattr(list_row, 'list_row_widget'):
+                list_row.list_row_widget.set_selected(list_row == row)
+        
         if row:
             self.current_list = row.todo_list
         else:
@@ -353,7 +405,7 @@ class MainWindow(Adw.ApplicationWindow):
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading="New List",
-            body="Enter a name for the new list (leave empty for auto-naming):"
+            body="Enter a name for the new list (max 32 chars, leave empty for auto-naming):"
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("create", "Create")
@@ -362,6 +414,7 @@ class MainWindow(Adw.ApplicationWindow):
         
         entry = Gtk.Entry()
         entry.set_placeholder_text("List name (optional)")
+        entry.set_max_length(32)  # Enforce character limit in UI
         entry.set_margin_start(12)
         entry.set_margin_end(12)
         dialog.set_extra_child(entry)
@@ -385,15 +438,35 @@ class MainWindow(Adw.ApplicationWindow):
         entry.connect("activate", lambda e: dialog.response("create"))
         dialog.present()
     
-    def _on_rename_list(self, btn):
-        """Rename the current list."""
-        if not self.current_list:
-            return
+    def _on_edit_list(self, todo_list: TodoList):
+        """Show edit options for a list (rename/delete)."""
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading=f"Edit \"{todo_list.name}\"",
+            body="What would you like to do with this list?"
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("rename", "Rename")
+        dialog.add_response("delete", "Delete")
+        dialog.set_response_appearance("delete", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
         
+        def on_response(dialog, response):
+            dialog.destroy()
+            if response == "rename":
+                self._show_rename_dialog(todo_list)
+            elif response == "delete":
+                self._show_delete_dialog(todo_list)
+        
+        dialog.connect("response", on_response)
+        dialog.present()
+    
+    def _show_rename_dialog(self, todo_list: TodoList):
+        """Show rename dialog for a list."""
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading="Rename List",
-            body="Enter a new name for the list:"
+            body="Enter a new name for the list (max 32 characters):"
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("rename", "Rename")
@@ -401,7 +474,8 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.set_default_response("rename")
         
         entry = Gtk.Entry()
-        entry.set_text(self.current_list.name)
+        entry.set_text(todo_list.name)
+        entry.set_max_length(32)  # Enforce character limit in UI
         entry.set_margin_start(12)
         entry.set_margin_end(12)
         dialog.set_extra_child(entry)
@@ -410,32 +484,37 @@ class MainWindow(Adw.ApplicationWindow):
             if response == "rename":
                 name = entry.get_text().strip()
                 if name:
-                    self.storage.rename_list(self.current_list.id, name)
-                    self.current_list.name = name
-                    self._load_lists()
-                    # Re-select current list
-                    for i in range(100):
-                        row = self.lists_box.get_row_at_index(i)
-                        if row is None:
-                            break
-                        if row.todo_list.id == self.current_list.id:
-                            self.lists_box.select_row(row)
-                            break
+                    success = self.storage.rename_list(todo_list.id, name)
+                    if success:
+                        if self.current_list and self.current_list.id == todo_list.id:
+                            self.current_list = self.storage.get_list(todo_list.id)
+                        self._load_lists()
+                    else:
+                        # Show error - name is likely a duplicate
+                        self._show_error_dialog("Could not rename list. The name may already be in use.")
             dialog.destroy()
         
         dialog.connect("response", on_response)
         entry.connect("activate", lambda e: dialog.response("rename"))
         dialog.present()
     
-    def _on_delete_list(self, btn):
-        """Delete the current list."""
-        if not self.current_list:
-            return
-        
+    def _show_error_dialog(self, message: str):
+        """Show an error message dialog."""
+        dialog = Adw.MessageDialog(
+            transient_for=self,
+            heading="Error",
+            body=message
+        )
+        dialog.add_response("ok", "OK")
+        dialog.set_default_response("ok")
+        dialog.present()
+    
+    def _show_delete_dialog(self, todo_list: TodoList):
+        """Show delete confirmation dialog for a list."""
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading="Delete List?",
-            body=f"Are you sure you want to delete \"{self.current_list.name}\"? This action cannot be undone."
+            body=f"Are you sure you want to delete \"{todo_list.name}\"? This action cannot be undone."
         )
         dialog.add_response("cancel", "Cancel")
         dialog.add_response("delete", "Delete")
@@ -444,8 +523,9 @@ class MainWindow(Adw.ApplicationWindow):
         
         def on_response(dialog, response):
             if response == "delete":
-                self.storage.delete_list(self.current_list.id)
-                self.current_list = None
+                self.storage.delete_list(todo_list.id)
+                if self.current_list and self.current_list.id == todo_list.id:
+                    self.current_list = None
                 self._load_lists()
                 self._load_tasks()
                 self._update_content_visibility()
@@ -498,6 +578,7 @@ class MainWindow(Adw.ApplicationWindow):
         
         entry = Gtk.Entry()
         entry.set_text(task.title)
+        entry.set_max_length(256)  # Enforce task title limit
         entry.set_margin_start(12)
         entry.set_margin_end(12)
         dialog.set_extra_child(entry)
@@ -524,4 +605,3 @@ class MainWindow(Adw.ApplicationWindow):
         self.current_list = self.storage.get_list(self.current_list.id)
         self._load_tasks()
         self._load_lists()  # Update task counts
-

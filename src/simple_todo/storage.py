@@ -2,11 +2,48 @@
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Optional
 
 from .models import TodoList, Task
+
+
+# Constants for input validation
+MAX_LIST_NAME_LENGTH = 32
+MAX_TASK_TITLE_LENGTH = 256
+
+
+def sanitize_input(text: str, max_length: int) -> str:
+    """Sanitize user input for safe storage.
+    
+    - Strips leading/trailing whitespace
+    - Removes control characters (except newlines for tasks)
+    - Limits length
+    - Removes null bytes
+    """
+    if not text:
+        return ""
+    
+    # Remove null bytes and control characters (ASCII 0-31 except tab/newline/carriage return)
+    # For list names, we remove all control chars; for tasks we might keep newlines
+    sanitized = "".join(
+        char for char in text 
+        if ord(char) >= 32 or char in '\t'
+    )
+    
+    # Strip whitespace
+    sanitized = sanitized.strip()
+    
+    # Collapse multiple spaces into one
+    sanitized = re.sub(r' +', ' ', sanitized)
+    
+    # Limit length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length].strip()
+    
+    return sanitized
 
 
 class Storage:
@@ -76,26 +113,61 @@ class Storage:
                 return lst
         return None
     
+    def _get_existing_names(self) -> set[str]:
+        """Return a set of all existing list names (lowercase for comparison)."""
+        return {lst.name.lower() for lst in self._lists}
+    
+    def _get_next_list_number(self) -> int:
+        """Find the next available number for auto-naming.
+        
+        Looks at all existing "List N" names and returns max(N) + 1.
+        """
+        max_num = 0
+        for lst in self._lists:
+            if lst.name.startswith("List "):
+                try:
+                    num = int(lst.name[5:])
+                    max_num = max(max_num, num)
+                except ValueError:
+                    pass
+        return max_num + 1
+    
+    def _generate_unique_name(self) -> str:
+        """Generate a unique auto-name for a new list."""
+        existing_names = self._get_existing_names()
+        num = self._get_next_list_number()
+        
+        # Keep incrementing until we find a unique name
+        while f"list {num}".lower() in existing_names:
+            num += 1
+        
+        return f"List {num}"
+    
     def create_list(self, name: Optional[str] = None) -> TodoList:
         """Create a new to-do list with optional name."""
         if not name or not name.strip():
-            # Auto-generate name: List 1, List 2, etc.
-            existing_nums = set()
-            for lst in self._lists:
-                if lst.name.startswith("List "):
-                    try:
-                        num = int(lst.name[5:])
-                        existing_nums.add(num)
-                    except ValueError:
-                        pass
+            # Auto-generate unique name
+            name = self._generate_unique_name()
+        else:
+            # Sanitize user-provided name
+            name = sanitize_input(name, MAX_LIST_NAME_LENGTH)
             
-            # Find the next available number
-            num = 1
-            while num in existing_nums:
-                num += 1
-            name = f"List {num}"
+            # Ensure uniqueness (case-insensitive)
+            existing_names = self._get_existing_names()
+            if name.lower() in existing_names:
+                # Append a number to make it unique
+                base_name = name
+                counter = 2
+                while f"{base_name} ({counter})".lower() in existing_names:
+                    counter += 1
+                name = f"{base_name} ({counter})"
+                # Re-check length after appending
+                if len(name) > MAX_LIST_NAME_LENGTH:
+                    # Truncate base name to fit
+                    suffix = f" ({counter})"
+                    name = base_name[:MAX_LIST_NAME_LENGTH - len(suffix)] + suffix
         
-        new_list = TodoList(name=name.strip())
+        new_list = TodoList(name=name)
         self._lists.append(new_list)
         self._save()
         return new_list
@@ -112,31 +184,56 @@ class Storage:
     def rename_list(self, list_id: str, new_name: str) -> bool:
         """Rename a list. Returns True if found and renamed."""
         lst = self.get_list(list_id)
-        if lst and new_name.strip():
-            lst.name = new_name.strip()
-            self._save()
-            return True
-        return False
+        if not lst:
+            return False
+        
+        # Sanitize the new name
+        new_name = sanitize_input(new_name, MAX_LIST_NAME_LENGTH)
+        if not new_name:
+            return False
+        
+        # Check for uniqueness (excluding the current list)
+        existing_names = {l.name.lower() for l in self._lists if l.id != list_id}
+        if new_name.lower() in existing_names:
+            return False  # Name already taken
+        
+        lst.name = new_name
+        self._save()
+        return True
     
     def add_task(self, list_id: str, title: str) -> Optional[Task]:
         """Add a task to a list. Returns the task if successful."""
         lst = self.get_list(list_id)
-        if lst and title.strip():
-            task = lst.add_task(title.strip())
-            self._save()
-            return task
-        return None
+        if not lst:
+            return None
+        
+        # Sanitize the task title
+        title = sanitize_input(title, MAX_TASK_TITLE_LENGTH)
+        if not title:
+            return None
+        
+        task = lst.add_task(title)
+        self._save()
+        return task
     
     def update_task(self, list_id: str, task_id: str, title: str) -> bool:
         """Update a task's title. Returns True if successful."""
         lst = self.get_list(list_id)
-        if lst:
-            task = lst.get_task(task_id)
-            if task and title.strip():
-                task.title = title.strip()
-                self._save()
-                return True
-        return False
+        if not lst:
+            return False
+        
+        task = lst.get_task(task_id)
+        if not task:
+            return False
+        
+        # Sanitize the task title
+        title = sanitize_input(title, MAX_TASK_TITLE_LENGTH)
+        if not title:
+            return False
+        
+        task.title = title
+        self._save()
+        return True
     
     def delete_task(self, list_id: str, task_id: str) -> bool:
         """Delete a task from a list. Returns True if successful."""
