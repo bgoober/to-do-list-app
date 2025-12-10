@@ -185,7 +185,7 @@ class MainWindow(Adw.ApplicationWindow):
         
         # Header bar
         header = Adw.HeaderBar()
-        header.set_title_widget(Gtk.Label(label="Simple Todo"))
+        header.set_title_widget(Gtk.Label(label="Simple Todo List"))
         
         # Sidebar toggle button in header
         self.sidebar_toggle_btn = Gtk.Button(icon_name="sidebar-show-symbolic")
