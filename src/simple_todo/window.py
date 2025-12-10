@@ -571,18 +571,21 @@ class MainWindow(Adw.ApplicationWindow):
         """Add a new task to the current list."""
         if not self.current_list:
             return
-        
+
         title = self.task_entry.get_text().strip()
         if not title:
             return
-        
+
         self.storage.add_task(self.current_list.id, title)
-        self.task_entry.set_text("")
-        
+
         # Refresh to get updated list from storage
         self.current_list = self.storage.get_list(self.current_list.id)
         self._load_tasks()
         self._load_lists()  # Update task counts
+
+        # Clear the entry text and restore focus to avoid GTK warnings
+        self.task_entry.set_text("")
+        self.task_entry.grab_focus()
     
     def _on_toggle_task(self, task_id: str):
         """Toggle task completion."""
