@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entry point for the Simple Todo application."""
+"""Entry point for the Simple Todo List application."""
 
 import sys
 import gi

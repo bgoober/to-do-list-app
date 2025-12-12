@@ -1,6 +1,6 @@
 # Simple To-Do List Desktop Application - Development Plan
 
-> This document outlines the architecture and implementation plan for the Simple Todo application.
+> This document outlines the architecture and implementation plan for the Simple Todo List application.
 
 ## Overview
 

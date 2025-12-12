@@ -1,11 +1,11 @@
-"""Setup script for Simple Todo."""
+"""Setup script for Simple Todo List."""
 
 from setuptools import setup, find_packages
 
 setup(
     name="simple-todo",
     version="1.0.0",
-    description="A minimal to-do list application",
+    description="A clean, lightweight to-do list application",
     author="bgoober",
     license="MIT",
     packages=find_packages(where="src"),

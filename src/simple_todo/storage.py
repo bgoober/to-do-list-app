@@ -1,4 +1,4 @@
-"""Storage layer for persisting to-do lists to JSON."""
+"""Storage layer for persisting to-do lists to JSON for Simple Todo List."""
 
 import json
 import os

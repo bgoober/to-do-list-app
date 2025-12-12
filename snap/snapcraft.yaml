@@ -1,8 +1,8 @@
 name: simple-todo
 version: '1.0.0'
-summary: A minimal to-do list application
+summary: A clean, lightweight to-do list application
 description: |
-  Simple Todo is a clean, lightweight to-do list application for managing
+  Simple Todo List is a clean, lightweight to-do list application for managing
   your tasks. Features include:
   
   - Create multiple to-do lists

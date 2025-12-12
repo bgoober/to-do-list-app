@@ -1,4 +1,4 @@
-"""Data models for the Simple Todo application."""
+"""Data models for the Simple Todo List application."""
 
 import uuid
 from dataclasses import dataclass, field

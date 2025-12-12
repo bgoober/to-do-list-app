@@ -1,6 +1,6 @@
-# Simple Todo
+# Simple Todo List
 
-A minimal, secure to-do list desktop application for Ubuntu/Linux, built with GTK4 and Python.
+A clean, lightweight to-do list desktop application for Ubuntu/Linux, built with GTK4 and Python.
 
 ## Features
 

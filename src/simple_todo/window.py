@@ -1,4 +1,4 @@
-"""Main window for the Simple Todo application."""
+"""Main window for the Simple Todo List application."""
 
 import gi
 gi.require_version("Gtk", "4.0")
@@ -133,7 +133,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.current_list: TodoList | None = None
         self.sidebar_expanded = True
         
-        self.set_title("Simple Todo")
+        self.set_title("Simple Todo List")
         self.set_default_size(800, 600)
         
         self._build_ui()
